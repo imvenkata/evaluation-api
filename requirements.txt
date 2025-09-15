@@ -1,0 +1,4 @@
+faiss-cpu
+numpy
+scikit-learn
+tqdm

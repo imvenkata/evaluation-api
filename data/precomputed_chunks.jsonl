@@ -1,0 +1,7 @@
+{"doc_id": "doc-001", "chunk_id": "c-001", "chunk": "The Titan-V1 model is a new embedding model.", "embedding": [0.1, 0.2, 0.3, 0.4, 0.5]}
+{"doc_id": "doc-001", "chunk_id": "c-002", "chunk": "It supports a context length of 8192 tokens.", "embedding": [0.2, 0.1, 0.3, 0.5, 0.4]}
+{"doc_id": "doc-002", "chunk_id": "c-001", "chunk": "The Atlas-V2 model is designed for speed.", "embedding": [0.9, 0.8, 0.1, 0.2, 0.3]}
+{"doc_id": "doc-002", "chunk_id": "c-002", "chunk": "It competes with Titan-V1 on performance benchmarks.", "embedding": [0.8, 0.9, 0.2, 0.1, 0.3]}
+{"doc_id": "doc-003", "chunk_id": "c-001", "chunk": "This is a very short chunk and should be rejected.", "embedding": [0.5, 0.5, 0.5, 0.5, 0.5]}
+{"doc_id": "doc-004", "chunk_id": "c-001", "chunk": "This is a duplicate chunk. The Titan-V1 model is a new embedding model.", "embedding": [0.1, 0.2, 0.3, 0.4, 0.5]}
+{"doc_id": "doc-004", "chunk_id": "c-002", "chunk": "Here is a perfectly valid and sufficiently long chunk of text to ensure it passes the heuristic validation phase without any issues.", "embedding": [0.1, 0.5, 0.2, 0.6, 0.3]}
