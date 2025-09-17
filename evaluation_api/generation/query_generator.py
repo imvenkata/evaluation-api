@@ -2,6 +2,7 @@
 # This is a STUBBED module. It simulates LLM calls to show the pipeline structure.
 
 import logging
+import os
 from typing import List
 from tqdm import tqdm
 
@@ -12,14 +13,40 @@ logger = logging.getLogger(__name__)
 class QueryGenerator:
     def __init__(self, config):
         """
-        In a real implementation, this is where you would initialize
-        your Azure OpenAI client using config.AZURE_OPENAI_ENDPOINT etc.
+        Initialize Azure OpenAI client. No fallback.
         """
         self.config = config
-        logger.info("QueryGenerator initialized (STUBBED).")
+        self.client = None
+        try:
+            from openai import AzureOpenAI  # type: ignore
+            endpoint = getattr(self.config, "AZURE_OPENAI_ENDPOINT", None)
+            api_key = (
+                os.environ.get("AZURE_OPENAI_KEY")
+                or os.environ.get("AZURE_OPENAI_API_KEY")
+                or os.environ.get("OPENAI_API_KEY")
+            )
+            if not endpoint:
+                logger.error("AZURE_OPENAI_ENDPOINT is not set. Please set it in .env.")
+                raise RuntimeError("Missing AZURE_OPENAI_ENDPOINT")
+            if not api_key:
+                logger.error("Azure OpenAI key not set. Please set AZURE_OPENAI_KEY (or AZURE_OPENAI_API_KEY/OPENAI_API_KEY) in .env.")
+                raise RuntimeError("Missing Azure OpenAI API key")
+
+            self.client = AzureOpenAI(
+                azure_endpoint=endpoint,
+                api_key=api_key,
+                api_version="2024-02-01"
+            )
+            logger.info("QueryGenerator initialized with Azure OpenAI endpoint.")
+        except ImportError:
+            logger.error("openai package not installed. Please add 'openai' to requirements and install.")
+            raise
 
     def generate_queries(self, bundles: List[SelectionBundle]) -> List[GeneratedQuery]:
         """Generates multiple query types for each bundle."""
+        if self.client is None:
+            raise RuntimeError("Azure OpenAI client not initialized")
+
         all_queries = []
         for bundle in tqdm(bundles, desc="Generating queries"):
             for query_type in self.config.QUERY_TYPES:
@@ -29,20 +56,20 @@ class QueryGenerator:
                     continue
                     
                 prompt = self._build_prompt(bundle, query_type)
-                
-                # --- STUBBED LLM CALL ---
-                query_text = self._call_stubbed_llm(bundle, query_type)
-                # --- END STUB ---
+
+                # Real LLM only; raise on failure
+                query_text = self._call_llm(prompt)
                 
                 if query_text:
                     all_queries.append(
                         GeneratedQuery(
                             query=query_text,
                             golden_chunks=bundle.golden_chunks,
-                            query_type=query_type
+                            query_type=query_type,
+                            distractor_chunks=bundle.distractor_chunks
                         )
                     )
-        logger.info(f"Generated {len(all_queries)} queries (STUBBED).")
+        logger.info("Generated %s queries.", len(all_queries))
         return all_queries
 
     def _build_prompt(self, bundle: SelectionBundle, query_type: str) -> str:
@@ -70,27 +97,22 @@ class QueryGenerator:
         """
         return prompt
 
-    def _call_stubbed_llm(self, bundle: SelectionBundle, query_type: str) -> str:
-        """A stub that simulates an LLM call."""
-        first_chunk_text = bundle.golden_chunks[0].chunk_text[:50]
-        return f"MOCK {query_type.upper()} QUERY about '{first_chunk_text}...'"
-
     def _call_llm(self, prompt: str) -> str:
-        """This is where the real Azure OpenAI call would go."""
-        # import os
-        # from openai import AzureOpenAI
-        # client = AzureOpenAI(
-        #     azure_endpoint=self.config.AZURE_OPENAI_ENDPOINT,
-        #     api_key=os.environ["AZURE_OPENAI_KEY"],
-        #     api_version="2024-02-01"
-        # )
-        # response = client.chat.completions.create(
-        #     model=self.config.AZURE_OPENAI_DEPLOYMENT_NAME,
-        #     messages=[{"role": "user", "content": prompt}],
-        #     max_tokens=30,
-        #     temperature=0.7
-        # )
-        # return response.choices[0].message.content
-        raise NotImplementedError("LLM call is stubbed. Use _call_stubbed_llm for testing.")
+        """Real Azure OpenAI chat.completions call."""
+        if self.client is None:
+            raise RuntimeError("Azure OpenAI client not initialized")
+        model = getattr(self.config, "AZURE_OPENAI_DEPLOYMENT_NAME", None)
+        if not model:
+            raise RuntimeError("AZURE_OPENAI_DEPLOYMENT_NAME not set in config")
+        temperature = getattr(self.config, "TEMPERATURE", 0.7)
+        max_tokens = getattr(self.config, "MAX_TOKENS", 64)
+
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return (response.choices[0].message.content or "").strip()
 
 # --- End File: search-evaluation-api/generation/query_generator.py ---

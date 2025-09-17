@@ -2,7 +2,7 @@
 # We need standardized dataclasses to pass data between modules.
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 @dataclass
 class ChunkData:
@@ -26,6 +26,7 @@ class GeneratedQuery:
     query: str
     golden_chunks: List[ChunkData]
     query_type: str # e.g., "factual", "keyword"
+    distractor_chunks: List[ChunkData]
 
 @dataclass
 class ValidatedGroundTruth:
@@ -35,8 +36,8 @@ class ValidatedGroundTruth:
     context_chunks: List[Dict[str, str]]
     validation: Dict[str, Any]
 
-    # Add __dict__ for easy JSON serialization in the CLI
-    def __dict__(self):
+    # Provide explicit serializer to avoid shadowing built-in __dict__
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "query": self.query,
             "expected_doc_ids": self.expected_doc_ids,

@@ -7,7 +7,7 @@ import importlib.util
 import sys
 import os
 import json
-from typing import List, Dict, Any
+from typing import List
 
 # Import all the modules in the pipeline
 from . import data_loader
@@ -17,17 +17,20 @@ from . import query_generator
 from . import evaluation_layer
 from .models import ValidatedGroundTruth, ChunkData
 
+# Module-level logger
+logger = logging.getLogger("generation.cli")
+
 # --- Configuration ---
 def load_config(config_path):
     """Loads a Python config file from a path."""
     config_path = os.path.abspath(config_path)
     if not os.path.exists(config_path):
-        logger.error(f"Config file not found: {config_path}")
+        logger.error("Config file not found: %s", config_path)
         sys.exit(1)
         
     spec = importlib.util.spec_from_file_location("generation_config", config_path)
     if spec is None:
-        logger.error(f"Could not load config spec from {config_path}")
+        logger.error("Could not load config spec from %s", config_path)
         sys.exit(1)
         
     config = importlib.util.module_from_spec(spec)
@@ -49,8 +52,8 @@ def save_dataset(dataset: List[ValidatedGroundTruth], path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         for item in dataset:
-            f.write(json.dumps(item.__dict__()) + "\n")
-    logger.info(f"Final dataset saved to {path}")
+            f.write(json.dumps(item.to_dict()) + "\n")
+    logger.info("Final dataset saved to %s", path)
 
 def save_rejected(chunks: List[ChunkData], path: str):
     """Saves the rejected chunks for auditing."""
@@ -65,7 +68,7 @@ def save_rejected(chunks: List[ChunkData], path: str):
                 "chunk_text": chunk.chunk_text,
                 "reject_reason": chunk.validation_meta.get('reject_reason', 'Unknown')
             }) + "\n")
-    logger.info(f"Rejected chunks log saved to {path}")
+    logger.info("Rejected chunks log saved to %s", path)
 
 
 # --- Main Orchestration ---
@@ -79,16 +82,21 @@ def main():
         required=True,
         help="Path to the generation_config.py file"
     )
+    parser.add_argument(
+        "--evaluation-mode",
+        type=str,
+        default="llm",
+        choices=["none", "nonllm", "llm", "hybrid"],
+        help="Evaluation strategy: none|nonllm|llm|hybrid"
+    )
     args = parser.parse_args()
 
     setup_logging()
-    global logger
-    logger = logging.getLogger("generation.cli")
 
     logger.info("--- Starting Synthetic Ground Truth Pipeline ---")
     
     # 1. Load Config
-    logger.info(f"Loading configuration from {args.config}...")
+    logger.info("Loading configuration from %s...", args.config)
     config = load_config(args.config)
 
     # 2. Load Data
@@ -118,8 +126,8 @@ def main():
         logger.error("No queries were generated. Exiting.")
         return
 
-    # 6. Evaluate Queries (Stubbed)
-    final_dataset = evaluation_layer.evaluate_queries(generated_queries, config)
+    # 6. Evaluate Queries (configurable)
+    final_dataset = evaluation_layer.evaluate_queries(generated_queries, config, args.evaluation_mode)
     if not final_dataset:
         logger.error("No queries passed final evaluation. No dataset will be saved.")
         return
@@ -128,7 +136,7 @@ def main():
     save_dataset(final_dataset, config.OUTPUT_PATH)
     
     logger.info("--- Pipeline Completed Successfully ---")
-    logger.info(f"Generated {len(final_dataset)} high-quality QA pairs.")
+    logger.info("Generated %s high-quality QA pairs.", len(final_dataset))
 
 
 if __name__ == "__main__":

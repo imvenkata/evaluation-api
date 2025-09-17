@@ -2,3 +2,14 @@ faiss-cpu
 numpy
 scikit-learn
 tqdm
+openai>=1.0.0
+pandas
+ragas
+deepeval
+llama-index
+python-dotenv
+azure-storage-blob
+azure-identity
+orjson
+tenacity
+rank-bm25
