@@ -83,14 +83,31 @@ Output format (`output/synthetic_ground_truth.jsonl`): one `ValidatedGroundTruth
 - Deterministic when `SEED` is provided.
 
 ### 4) Query generation (`query_generator.py`)
-- Current: STUB. Produces mock queries by inspecting golden chunk text.
-- Planned: Azure OpenAI call with a “distractor-aware” prompt so queries are only answerable by golden context.
+- Azure OpenAI call with a distractor-aware, type-specific prompt so queries are only answerable by golden context.
   - Reads secrets from env: `AZURE_OPENAI_KEY`.
   - Reads endpoint/model from config: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME`.
+  - Supported query types (set in `configs/generation_config.py`):
+    - `concept_seeking`: Abstract multi-sentence-answer questions (e.g., "Why should I use semantic search to rank results?")
+    - `exact_snippet`: Verbatim substring from golden context (longer phrase)
+    - `web_search_like`: Short web-style queries (e.g., "Best retrieval concept queries")
+    - `low_overlap`: Paraphrases with low lexical overlap
+    - `fact_seeking`: Single, clear answer (e.g., "How many documents are semantically ranked")
+    - `keyword`: Only key identifier words (e.g., "semantic ranker")
+    - `misspellings`: Includes 1-2 realistic typos (e.g., "Ho w mny documents are samantically r4nked")
+    - `long`: >20 tokens
+    - `medium`: 5–20 tokens
+    - `short`: <5 tokens
+    - `comparison`: Compare/contrast across multiple golden snippets (requires >=2 golden chunks)
+
+  - Aliases accepted: `factual`→`fact_seeking`, `concept`→`concept_seeking`, `web`→`web_search_like`, `exact`→`exact_snippet`, `misspelling`→`misspellings`.
+
+  - Length controls:
+    - `QUERY_TYPE_MAX_TOKENS` map to cap LLM output per type.
+    - `QUERY_LENGTH_TARGETS` to guide token ranges for `long`/`medium`/`short`.
+    - You can override via env, e.g. `QUERY_TYPES=keyword,short`, `QUERY_MAX_TOKENS_long=64` (via config dict if edited directly).
 
 ### 5) Evaluation (`evaluation_layer.py`)
-- Current: STUB. Assigns random scores and filters by thresholds.
-- Planned: Use Ragas (Context Relevance, Faithfulness) and DeepEval checks; persist per-metric scores in `validation`.
+- Non-LLM BM25/coverage checks or Azure OpenAI answer + Ragas scoring. Thresholds in config.
 
 ---
 

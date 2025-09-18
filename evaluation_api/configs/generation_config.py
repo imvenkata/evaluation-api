@@ -46,8 +46,64 @@ SELECTION_TARGET_QUERIES = int(os.getenv("SELECTION_TARGET_QUERIES", "2"))
 NUM_DISTRACTORS = 3
 
 # --- Query Generation ---
-# Types of queries to generate per chunk
-QUERY_TYPES = ["factual", "keyword"]
+# Types of queries to generate per chunk. Supported values:
+#   "concept_seeking", "exact_snippet", "web_search_like", "low_overlap",
+#   "fact_seeking", "keyword", "misspellings", "long", "medium", "short",
+#   "comparison"
+# Users can override via environment variable QUERY_TYPES (comma-separated)
+_DEFAULT_QUERY_TYPES = [
+    "concept_seeking",
+    "exact_snippet",
+    "web_search_like",
+    "low_overlap",
+    "fact_seeking",
+    "keyword",
+    "misspellings",
+    "long",
+    "medium",
+    "short",
+]
+_env_query_types = os.getenv("QUERY_TYPES", None)
+if _env_query_types:
+    QUERY_TYPES = [t.strip() for t in _env_query_types.split(",") if t.strip()]
+else:
+    QUERY_TYPES = _DEFAULT_QUERY_TYPES
+
+# Per-type max tokens for LLM output (query length control)
+# Users can override via env, e.g., QUERY_MAX_TOKENS_long=64
+QUERY_TYPE_MAX_TOKENS = {
+    "concept_seeking": 48,
+    "exact_snippet": 96,
+    "web_search_like": 16,
+    "low_overlap": 48,
+    "fact_seeking": 24,
+    "keyword": 8,
+    "misspellings": 24,
+    "long": 64,
+    "medium": 32,
+    "short": 8,
+    "comparison": 32,
+}
+
+# Length targets (token ranges) to guide prompts
+QUERY_LENGTH_TARGETS = {
+    "long": (21, 128),
+    "medium": (5, 20),
+    "short": (1, 4),
+}
+
+# Apply environment overrides for per-type max tokens, accepting both
+# QUERY_MAX_TOKENS_<type> and QUERY_TYPE_MAX_TOKENS_<type> (case-sensitive)
+for _qt, _default in list(QUERY_TYPE_MAX_TOKENS.items()):
+    for _prefix in ("QUERY_MAX_TOKENS_", "QUERY_TYPE_MAX_TOKENS_"):
+        _env_key_mixed = f"{_prefix}{_qt}"
+        _env_key_upper = f"{_prefix}{_qt.upper()}"
+        _val = os.getenv(_env_key_mixed, os.getenv(_env_key_upper, None))
+        if _val is not None:
+            try:
+                QUERY_TYPE_MAX_TOKENS[_qt] = int(_val)
+            except ValueError:
+                pass
 # Azure OpenAI config (for real implementation)
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "")
