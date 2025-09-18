@@ -105,15 +105,27 @@ def main():
         logger.error("No data loaded. Exiting.")
         return
 
-    # 3. Validate Chunks
-    valid_chunks, rejected_chunks = chunk_validator.validate_chunks(all_chunks, config)
+    # 3. Validate Chunks (and build/reuse search backend)
+    valid_chunks, rejected_chunks, backend = chunk_validator.validate_chunks(all_chunks, config)
     save_rejected(rejected_chunks, config.REJECTED_CHUNKS_PATH)
     if not valid_chunks:
         logger.error("No valid chunks after validation. Exiting.")
         return
 
-    # 4. Select Contexts
-    selector = chunk_selector.ContextSelector(valid_chunks, config)
+    # Optional: Drop per-chunk embeddings to reduce memory when using FAISS backend
+    try:
+        be_info = backend.get_backend_info() if backend else {}
+        if be_info.get("backend") == "FAISS":
+            for c in valid_chunks:
+                # Remove external embedding copy; FAISS backend holds normalized matrix
+                c.embedding = []  # type: ignore[assignment]
+            logger.info("Dropped per-chunk embeddings to reduce memory (FAISS in use).")
+    except Exception:
+        # Best-effort; continue if anything goes wrong
+        pass
+
+    # 4. Select Contexts (reuse backend if available)
+    selector = chunk_selector.ContextSelector(valid_chunks, config, backend=backend)
     logger.info("Using search backend: %s", selector.get_backend_info())
     bundles = selector.select_contexts()
     if not bundles:

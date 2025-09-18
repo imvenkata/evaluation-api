@@ -30,9 +30,18 @@ MAX_TOKEN_LENGTH = 350
 DUPLICATE_COSINE_SIM = 0.98
 
 # --- Context Selection ---
-# How many queries to attempt to generate
-# 0.1 = attempt to generate queries for 10% of valid chunks
-SELECTION_SAMPLE_RATE = 0.1
+# How many queries to attempt to generate (rate-based)
+# 0.1 = attempt to generate queries for 10% of the selected unit (see SELECTION_SAMPLE_MODE)
+SELECTION_SAMPLE_RATE = 1
+
+# Choose sampling unit: "chunks" or "documents"
+SELECTION_SAMPLE_MODE = os.getenv("SELECTION_SAMPLE_MODE", "chunks")
+
+# Alternatively, request a fixed number of queries (overrides rate if > 0).
+# Each selection bundle can produce len(QUERY_TYPES) queries; selector targets
+# ceil(SELECTION_TARGET_QUERIES / len(QUERY_TYPES)) bundles when > 0.
+SELECTION_TARGET_QUERIES = int(os.getenv("SELECTION_TARGET_QUERIES", "2"))
+
 # Number of "hard negative" distractors to find
 NUM_DISTRACTORS = 3
 
@@ -45,7 +54,7 @@ AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "")
 
 # --- Embeddings / Reproducibility ---
 # Set to 1024 to match input embedding dimension
-EMBED_DIM = 1024
+EMBED_DIM = 512
 SEED = 42
 
 # --- Azure Blob (optional path) ---

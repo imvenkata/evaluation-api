@@ -126,11 +126,11 @@ class FAISSBackend(SearchBackend):
             logger.warning("Chunk %s not found in index", chunk.chunk_id)
             return []
         
-        # Prepare query vector
-        query_vector = np.array([chunk.embedding], dtype=np.float32)
-        qn = np.linalg.norm(query_vector, axis=1, keepdims=True)
-        qn = np.maximum(qn, 1e-12)
-        query_vector = query_vector / qn
+        # Prepare query vector from internal normalized embeddings to avoid relying on external chunk.embedding
+        if self.embeddings is None:
+            logger.error("FAISS embeddings matrix is not available")
+            return []
+        query_vector = self.embeddings[chunk_idx:chunk_idx+1]
         
         # Search for k+1 neighbors (including self)
         k_search = min(k + 1, len(self.chunks))

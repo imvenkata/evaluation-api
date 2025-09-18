@@ -3,7 +3,7 @@
 
 import logging
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Any
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
@@ -11,7 +11,11 @@ from .models import ChunkData
 
 logger = logging.getLogger(__name__)
 
-def validate_chunks(chunks: List[ChunkData], config) -> Tuple[List[ChunkData], List[ChunkData]]:
+def validate_chunks(
+    chunks: List[ChunkData],
+    config,
+    backend: Optional[Any] = None,
+) -> Tuple[List[ChunkData], List[ChunkData], Optional[Any]]:
     """
     Applies heuristic and similarity-based validation to filter chunks.
     """
@@ -33,30 +37,38 @@ def validate_chunks(chunks: List[ChunkData], config) -> Tuple[List[ChunkData], L
 
     # 2. Duplicate Validation using search backend
     if not valid_chunks:
-        return [], rejected_chunks
+        return [], rejected_chunks, backend
 
     # Check if we should use search backend for duplicate detection
     use_backend_dedup = getattr(config, 'USE_BACKEND_DUPLICATE_DETECTION', True)
     if use_backend_dedup:
-        return validate_duplicates_with_backend(valid_chunks, rejected_chunks, config)
+        final_valid, final_rejected, be = validate_duplicates_with_backend(valid_chunks, rejected_chunks, config, backend)
+        return final_valid, final_rejected, be
     else:
-        return validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+        v, r = validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+        return v, r, backend
 
 
-def validate_duplicates_with_backend(valid_chunks: List[ChunkData], rejected_chunks: List[ChunkData], config) -> Tuple[List[ChunkData], List[ChunkData]]:
+def validate_duplicates_with_backend(
+    valid_chunks: List[ChunkData],
+    rejected_chunks: List[ChunkData],
+    config,
+    backend: Optional[Any] = None,
+) -> Tuple[List[ChunkData], List[ChunkData], Optional[Any]]:
     """Use search backend for duplicate detection"""
     from .search_backends import create_search_backend
     
     logger.info("Checking for near-duplicates using search backend...")
     
-    # Create backend for duplicate detection
-    backend = create_search_backend(valid_chunks, config)
-    if backend is None:
+    # Create backend for duplicate detection if not provided
+    be = backend or create_search_backend(valid_chunks, config)
+    if be is None:
         logger.warning("Failed to create search backend for duplicate detection, falling back to legacy method")
-        return validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+        v, r = validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+        return v, r, None
     
     try:
-        duplicate_pairs = backend.find_duplicates(config.DUPLICATE_COSINE_SIM)
+        duplicate_pairs = be.find_duplicates(config.DUPLICATE_COSINE_SIM)
         
         # Mark duplicates for removal (keep first occurrence)
         duplicate_indices = set()
@@ -66,19 +78,20 @@ def validate_duplicates_with_backend(valid_chunks: List[ChunkData], rejected_chu
         final_valid_chunks = []
         for i, chunk in enumerate(valid_chunks):
             if i in duplicate_indices:
-                chunk.validation_meta['reject_reason'] = f"Near-duplicate chunk (via {backend.get_backend_info().get('backend', 'search backend')})"
+                chunk.validation_meta['reject_reason'] = f"Near-duplicate chunk (via {be.get_backend_info().get('backend', 'search backend')})"
                 rejected_chunks.append(chunk)
             else:
                 chunk.validation_meta['status'] = "Validated"
                 final_valid_chunks.append(chunk)
         
         logger.info("Duplicate check complete via %s. Final valid chunks: %s", 
-                   backend.get_backend_info().get('backend', 'search backend'), len(final_valid_chunks))
-        return final_valid_chunks, rejected_chunks
+                   be.get_backend_info().get('backend', 'search backend'), len(final_valid_chunks))
+        return final_valid_chunks, rejected_chunks, be
         
     except Exception as e:
         logger.error("Error in backend duplicate detection: %s. Falling back to legacy method.", e)
-        return validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+        v, r = validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+        return v, r, be
 
 
 def validate_duplicates_legacy(valid_chunks: List[ChunkData], rejected_chunks: List[ChunkData], config) -> Tuple[List[ChunkData], List[ChunkData]]:
@@ -97,7 +110,8 @@ def validate_duplicates_legacy(valid_chunks: List[ChunkData], rejected_chunks: L
     duplicate_indices = set()
     use_faiss = True
     try:
-        import faiss  # type: ignore
+        import importlib
+        faiss = importlib.import_module("faiss")  # type: ignore
 
         num = embeddings_norm.shape[0]
         dim = embeddings_norm.shape[1]
