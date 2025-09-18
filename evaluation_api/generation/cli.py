@@ -120,12 +120,19 @@ def main():
         logger.error("No context bundles selected. Exiting.")
         return
 
-    # 5. Generate Queries (Stubbed)
+    # 5. Generate Queries (with caching)
     q_generator = query_generator.QueryGenerator(config)
     generated_queries = q_generator.generate_queries(bundles)
     if not generated_queries:
         logger.error("No queries were generated. Exiting.")
         return
+    
+    # Log cache statistics
+    cache_stats = q_generator.get_cache_stats()
+    if cache_stats.get("caching") != "disabled":
+        logger.info("LLM Cache Stats: %d files, %.2f MB", 
+                   cache_stats.get("file_count", 0), 
+                   cache_stats.get("total_size_mb", 0))
 
     # 6. Evaluate Queries (configurable)
     final_dataset = evaluation_layer.evaluate_queries(generated_queries, config, args.evaluation_mode)

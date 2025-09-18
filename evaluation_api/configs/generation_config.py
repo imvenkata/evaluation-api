@@ -31,8 +31,8 @@ DUPLICATE_COSINE_SIM = 0.98
 
 # --- Context Selection ---
 # How many queries to attempt to generate
-# 1.0 = attempt to generate queries for 100% of valid chunks
-SELECTION_SAMPLE_RATE = 1.0
+# 0.1 = attempt to generate queries for 10% of valid chunks
+SELECTION_SAMPLE_RATE = 0.1
 # Number of "hard negative" distractors to find
 NUM_DISTRACTORS = 3
 
@@ -99,6 +99,33 @@ EVAL_LLM_SAMPLE_RATE = 0.1
 
 # --- LLM Concurrency / Rate Limiting ---
 # Max concurrent LLM calls; tune to your Azure OpenAI limits
-LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "8"))
-# Approx QPS cap across workers
-LLM_MAX_QPS = float(os.getenv("LLM_MAX_QPS", "2.0"))
+LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "16"))
+# Approx QPS cap across workers - increase based on your Azure OpenAI quota
+LLM_MAX_QPS = float(os.getenv("LLM_MAX_QPS", "10.0"))
+
+# --- LLM Request Optimization ---
+# Optimize for faster query generation
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.5"))  # Lower = more consistent, faster
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "32"))       # Shorter queries = faster generation
+LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "15"))  # Prevent hanging requests
+
+# --- Advanced Rate Limiting ---
+# Burst capacity for better throughput
+LLM_BURST_CAPACITY = int(os.getenv("LLM_BURST_CAPACITY", "50"))  # Allow bursts up to 50 requests
+LLM_REFILL_RATE = float(os.getenv("LLM_REFILL_RATE", "10.0"))    # Refill at 10 tokens/second
+
+# --- Caching Configuration ---
+# Enable caching for massive performance improvements
+ENABLE_CACHING = bool(os.getenv("ENABLE_CACHING", "True").lower() in ("true", "1", "yes"))
+CACHE_DIR = os.getenv("CACHE_DIR", "./cache")
+
+# Cache settings for different components
+CACHE_DATA_LOADING = bool(os.getenv("CACHE_DATA_LOADING", "True").lower() in ("true", "1", "yes"))
+CACHE_VALIDATION = bool(os.getenv("CACHE_VALIDATION", "True").lower() in ("true", "1", "yes"))
+CACHE_SELECTION = bool(os.getenv("CACHE_SELECTION", "True").lower() in ("true", "1", "yes"))
+CACHE_LLM_QUERIES = bool(os.getenv("CACHE_LLM_QUERIES", "True").lower() in ("true", "1", "yes"))
+CACHE_EVALUATION = bool(os.getenv("CACHE_EVALUATION", "True").lower() in ("true", "1", "yes"))
+
+# Cache management
+CACHE_TTL_HOURS = int(os.getenv("CACHE_TTL_HOURS", "168"))  # 1 week default
+CACHE_MAX_SIZE_MB = int(os.getenv("CACHE_MAX_SIZE_MB", "1024"))  # 1GB default
