@@ -1,4 +1,27 @@
-faiss-cpu
+# Core dependencies
 numpy
 scikit-learn
 tqdm
+pandas
+python-dotenv
+orjson
+tenacity
+rank-bm25
+
+# LLM and evaluation
+openai>=1.0.0
+ragas
+deepeval
+llama-index
+
+# Search backends (choose based on SEARCH_BACKEND config)
+# For FAISS backend
+faiss-cpu
+
+# For Azure backends
+azure-storage-blob
+azure-identity
+azure-search-documents>=11.6.0
+
+# Optional: For GPU acceleration (if using FAISS with GPU)
+# faiss-gpu
