@@ -44,7 +44,8 @@ AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "")
 
 # --- Embeddings / Reproducibility ---
-EMBED_DIM = 512
+# Set to 1024 to match input embedding dimension
+EMBED_DIM = 1024
 SEED = 42
 
 # --- Azure Blob (optional path) ---
@@ -54,13 +55,36 @@ BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "")
 BLOB_PREFIX = os.getenv("AZURE_BLOB_PREFIX", "")
 BLOB_MAX_WORKERS = int(os.getenv("AZURE_BLOB_MAX_WORKERS", "64"))
 
-# --- FAISS IVF selection (for large N) ---
-USE_IVF_SELECTION = os.getenv("USE_IVF_SELECTION", "false").lower() == "true"
-IVF_NLIST = int(os.getenv("IVF_NLIST", "512"))
-IVF_NPROBE = int(os.getenv("IVF_NPROBE", "32"))
+# --- Search Backend Selection ---
+# Options: "faiss", "azure_search", "hybrid_search"
+SEARCH_BACKEND = os.getenv("SEARCH_BACKEND", "faiss")
+
+# --- FAISS Backend Configuration ---
+# Leave USE_IVF_SELECTION unset to allow auto-enable for large datasets (>=20k)
+USE_IVF_SELECTION = None
+IVF_NLIST = int(os.getenv("IVF_NLIST", "1024"))
+IVF_NPROBE = int(os.getenv("IVF_NPROBE", "64"))
 
 # --- Dedup tuning ---
 DEDUP_MAX_NEIGHBORS = int(os.getenv("DEDUP_MAX_NEIGHBORS", "20"))
+# Guard to avoid O(n^2) cosine fallback on large datasets if FAISS is missing
+DEDUP_LARGE_GUARD_N = int(os.getenv("DEDUP_LARGE_GUARD_N", "50000"))
+
+# --- Azure AI Search Backend Configuration ---
+AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT", "")
+AZURE_SEARCH_INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX_NAME", "")
+AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY", "")
+
+# Azure Search field mappings
+AZURE_SEARCH_VECTOR_FIELD = os.getenv("AZURE_SEARCH_VECTOR_FIELD", "content_vector")
+AZURE_SEARCH_CONTENT_FIELD = os.getenv("AZURE_SEARCH_CONTENT_FIELD", "chunk_text")
+AZURE_SEARCH_DOC_ID_FIELD = os.getenv("AZURE_SEARCH_DOC_ID_FIELD", "doc_id")
+AZURE_SEARCH_CHUNK_ID_FIELD = os.getenv("AZURE_SEARCH_CHUNK_ID_FIELD", "chunk_id")
+
+# Azure Search performance tuning
+AZURE_SEARCH_BATCH_SIZE = int(os.getenv("AZURE_SEARCH_BATCH_SIZE", "100"))
+AZURE_SEARCH_RETRY_ATTEMPTS = int(os.getenv("AZURE_SEARCH_RETRY_ATTEMPTS", "3"))
+AZURE_SEARCH_TIMEOUT_SECONDS = int(os.getenv("AZURE_SEARCH_TIMEOUT_SECONDS", "30"))
 
 # --- Evaluation Layer ---
 # Minimum Ragas/DeepEval scores to accept a synthetic query
@@ -72,3 +96,9 @@ BM25_MIN_MARGIN = 0.5
 COVERAGE_MIN_GOLDEN = 0.6
 COVERAGE_GAP_MIN = 0.2
 EVAL_LLM_SAMPLE_RATE = 0.1
+
+# --- LLM Concurrency / Rate Limiting ---
+# Max concurrent LLM calls; tune to your Azure OpenAI limits
+LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "8"))
+# Approx QPS cap across workers
+LLM_MAX_QPS = float(os.getenv("LLM_MAX_QPS", "2.0"))

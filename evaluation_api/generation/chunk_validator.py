@@ -31,11 +31,59 @@ def validate_chunks(chunks: List[ChunkData], config) -> Tuple[List[ChunkData], L
 
     logger.info(f"Heuristics passed: {len(valid_chunks)}, rejected: {len(rejected_chunks)}")
 
-    # 2. Duplicate Validation (ANN-based with FAISS; falls back to cosine if unavailable)
+    # 2. Duplicate Validation using search backend
     if not valid_chunks:
         return [], rejected_chunks
 
-    logger.info("Checking for near-duplicates using ANN (FAISS if available)...")
+    # Check if we should use search backend for duplicate detection
+    use_backend_dedup = getattr(config, 'USE_BACKEND_DUPLICATE_DETECTION', True)
+    if use_backend_dedup:
+        return validate_duplicates_with_backend(valid_chunks, rejected_chunks, config)
+    else:
+        return validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+
+
+def validate_duplicates_with_backend(valid_chunks: List[ChunkData], rejected_chunks: List[ChunkData], config) -> Tuple[List[ChunkData], List[ChunkData]]:
+    """Use search backend for duplicate detection"""
+    from .search_backends import create_search_backend
+    
+    logger.info("Checking for near-duplicates using search backend...")
+    
+    # Create backend for duplicate detection
+    backend = create_search_backend(valid_chunks, config)
+    if backend is None:
+        logger.warning("Failed to create search backend for duplicate detection, falling back to legacy method")
+        return validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+    
+    try:
+        duplicate_pairs = backend.find_duplicates(config.DUPLICATE_COSINE_SIM)
+        
+        # Mark duplicates for removal (keep first occurrence)
+        duplicate_indices = set()
+        for i, j in duplicate_pairs:
+            duplicate_indices.add(j)  # Remove the second occurrence
+        
+        final_valid_chunks = []
+        for i, chunk in enumerate(valid_chunks):
+            if i in duplicate_indices:
+                chunk.validation_meta['reject_reason'] = f"Near-duplicate chunk (via {backend.get_backend_info().get('backend', 'search backend')})"
+                rejected_chunks.append(chunk)
+            else:
+                chunk.validation_meta['status'] = "Validated"
+                final_valid_chunks.append(chunk)
+        
+        logger.info("Duplicate check complete via %s. Final valid chunks: %s", 
+                   backend.get_backend_info().get('backend', 'search backend'), len(final_valid_chunks))
+        return final_valid_chunks, rejected_chunks
+        
+    except Exception as e:
+        logger.error("Error in backend duplicate detection: %s. Falling back to legacy method.", e)
+        return validate_duplicates_legacy(valid_chunks, rejected_chunks, config)
+
+
+def validate_duplicates_legacy(valid_chunks: List[ChunkData], rejected_chunks: List[ChunkData], config) -> Tuple[List[ChunkData], List[ChunkData]]:
+    """Legacy FAISS/cosine-based duplicate detection"""
+    logger.info("Checking for near-duplicates using legacy method...")
     embeddings = np.array([c.embedding for c in valid_chunks], dtype=np.float32)
     if embeddings.size == 0:
         logger.warning("No embeddings found in valid chunks. Skipping duplicate check.")
@@ -91,9 +139,14 @@ def validate_chunks(chunks: List[ChunkData], config) -> Tuple[List[ChunkData], L
                     if j > i:
                         duplicate_indices.add(int(j))
     except Exception:  # noqa: BLE001
-        # FAISS not available or failed; fall back to cosine_similarity (O(n^2))
+        # Guard: on large datasets, abort instead of O(n^2) fallback
+        num = embeddings_norm.shape[0]
+        large_guard = int(getattr(config, 'DEDUP_LARGE_GUARD_N', 50000))
+        if num >= large_guard:
+            logger.error("FAISS unavailable for dedup and dataset is large (n=%s). Aborting to avoid O(n^2) computation.", num)
+            raise RuntimeError("Dedup requires FAISS for large datasets; install faiss-cpu or lower dataset size.")
         use_faiss = False
-        logger.warning("FAISS unavailable; falling back to O(n^2) cosine duplicate check.")
+        logger.warning("FAISS unavailable; falling back to O(n^2) cosine duplicate check for n=%s (below guard=%s).", num, large_guard)
         try:
             sim_matrix = cosine_similarity(embeddings_norm)
             for i in tqdm(range(len(valid_chunks)), desc="Finding duplicates (cosine)"):

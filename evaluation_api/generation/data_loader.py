@@ -97,7 +97,8 @@ def _load_from_chunks(input_paths: List[str], config) -> List[ChunkData]:
         dim = list(dims_seen)[0]
         expected = getattr(config, 'EMBED_DIM', None)
         if expected is not None and dim != expected:
-            logger.warning("Loaded embedding dim %s does not match config.EMBED_DIM=%s", dim, expected)
+            logger.error("Loaded embedding dim %s does not match config.EMBED_DIM=%s", dim, expected)
+            raise ValueError(f"Embedding dimension mismatch: data={dim}, config={expected}")
 
     return chunks
 
@@ -145,21 +146,45 @@ def _load_from_azure_blob(config) -> List[ChunkData]:
     if not blob_paths:
         logger.error("No JSON blobs found under prefix: %s", prefix)
         return []
+    if len(blob_paths) > 50000:
+        logger.warning("Large number of small blobs detected: %s. Consider consolidating into larger JSONL files for performance.", len(blob_paths))
 
     chunks: List[ChunkData] = []
     dims_seen = set()
 
     def fetch_and_parse(blob_name: str):
         try:
-            downloader = client.download_blob(blob_name)
+            # Lazy import to avoid hard dependency if not used
+            from tenacity import retry, stop_after_attempt, wait_exponential_jitter  # type: ignore
+        except (ModuleNotFoundError, ImportError):
+            retry = None  # type: ignore
+        try:
+            from azure.core.exceptions import AzureError  # type: ignore
+        except (ModuleNotFoundError, ImportError):  # pragma: no cover
+            class AzureError(Exception):
+                pass
+
+        def _download_once(name: str):
+            downloader = client.download_blob(name)
             data_bytes = downloader.readall()
             if orjson is not None:
-                obj = orjson.loads(data_bytes)
-            else:
-                obj = json.loads(data_bytes)
+                return orjson.loads(data_bytes)
+            return json.loads(data_bytes)
+
+        if retry is not None:
+            @retry(stop=stop_after_attempt(int(getattr(config, 'BLOB_RETRY_ATTEMPTS', 5))),
+                   wait=wait_exponential_jitter(initial=0.2, max=8.0))
+            def _download_with_retry(name: str):
+                return _download_once(name)
+            download_fn = _download_with_retry
+        else:
+            download_fn = _download_once
+
+        try:
+            obj = download_fn(blob_name)
             c, dim = _to_chunkdata(obj)
             return c, dim, None
-        except Exception as e:  # noqa: BLE001
+        except (AzureError, ValueError, json.JSONDecodeError) as e:  # type: ignore[attr-defined]
             return None, None, (blob_name, str(e))
 
     logger.info("Downloading %s blobs with up to %s workers...", len(blob_paths), max_workers)
@@ -184,7 +209,8 @@ def _load_from_azure_blob(config) -> List[ChunkData]:
         dim = list(dims_seen)[0]
         expected = getattr(config, 'EMBED_DIM', None)
         if expected is not None and dim != expected:
-            logger.warning("Loaded embedding dim %s does not match config.EMBED_DIM=%s", dim, expected)
+            logger.error("Loaded embedding dim %s does not match config.EMBED_DIM=%s", dim, expected)
+            raise ValueError(f"Embedding dimension mismatch: data={dim}, config={expected}")
 
     return chunks
 

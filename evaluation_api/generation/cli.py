@@ -114,6 +114,7 @@ def main():
 
     # 4. Select Contexts
     selector = chunk_selector.ContextSelector(valid_chunks, config)
+    logger.info("Using search backend: %s", selector.get_backend_info())
     bundles = selector.select_contexts()
     if not bundles:
         logger.error("No context bundles selected. Exiting.")

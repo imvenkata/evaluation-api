@@ -4,6 +4,9 @@
 import logging
 import os
 from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
 from tqdm import tqdm
 
 from .models import SelectionBundle, GeneratedQuery
@@ -47,30 +50,64 @@ class QueryGenerator:
         if self.client is None:
             raise RuntimeError("Azure OpenAI client not initialized")
 
-        all_queries = []
-        for bundle in tqdm(bundles, desc="Generating queries"):
-            for query_type in self.config.QUERY_TYPES:
-                # This check prevents trying to make a "comparison" query
-                # from a single golden chunk.
-                if query_type == "comparison" and len(bundle.golden_chunks) < 2:
-                    continue
-                    
-                prompt = self._build_prompt(bundle, query_type)
+        max_workers = int(getattr(self.config, "LLM_MAX_WORKERS", 8))
+        max_qps = float(getattr(self.config, "LLM_MAX_QPS", 2.0))
 
-                # Real LLM only; raise on failure
-                query_text = self._call_llm(prompt)
-                
-                if query_text:
-                    all_queries.append(
-                        GeneratedQuery(
-                            query=query_text,
-                            golden_chunks=bundle.golden_chunks,
-                            query_type=query_type,
-                            distractor_chunks=bundle.distractor_chunks
-                        )
-                    )
-        logger.info("Generated %s queries.", len(all_queries))
-        return all_queries
+        # Simple token bucket
+        qps_lock = threading.Lock()
+        last_times: List[float] = []
+
+        def acquire_token():
+            nonlocal last_times
+            while True:
+                with qps_lock:
+                    now = time.time()
+                    # remove entries older than 1s
+                    last_times = [t for t in last_times if now - t < 1.0]
+                    if len(last_times) < max_qps:
+                        last_times.append(now)
+                        return
+                time.sleep(0.01)
+
+        def process(bundle: SelectionBundle, query_type: str):
+            if query_type == "comparison" and len(bundle.golden_chunks) < 2:
+                return None
+            prompt = self._build_prompt(bundle, query_type)
+            # Rate limit and call LLM with retry
+            from tenacity import retry, stop_after_attempt, wait_exponential_jitter  # type: ignore
+
+            @retry(stop=stop_after_attempt(5), wait=wait_exponential_jitter(initial=0.2, max=6.0))
+            def call():
+                acquire_token()
+                return self._call_llm(prompt)
+
+            try:
+                query_text = call()
+            except Exception as e:  # noqa: BLE001
+                # Narrow error classes if available at runtime
+                logger.warning("LLM call failed after retries: %s", e)
+                return None
+            if query_text:
+                return GeneratedQuery(
+                    query=query_text,
+                    golden_chunks=bundle.golden_chunks,
+                    query_type=query_type,
+                    distractor_chunks=bundle.distractor_chunks,
+                )
+            return None
+
+        tasks = []
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for bundle in bundles:
+                for query_type in self.config.QUERY_TYPES:
+                    tasks.append(ex.submit(process, bundle, query_type))
+            results = []
+            for fut in tqdm(as_completed(tasks), total=len(tasks), desc="Generating queries"):
+                res = fut.result()
+                if res is not None:
+                    results.append(res)
+        logger.info("Generated %s queries.", len(results))
+        return results
 
     def _build_prompt(self, bundle: SelectionBundle, query_type: str) -> str:
         """Constructs the distractor-aware prompt."""
