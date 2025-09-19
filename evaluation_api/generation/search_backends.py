@@ -30,6 +30,11 @@ class SearchBackend(ABC):
     def find_similar_chunks(self, chunk: ChunkData, k: int) -> List[ChunkData]:
         """Find k most similar chunks to the given chunk (excluding itself)"""
         raise NotImplementedError
+
+    def find_similar_chunks_with_scores(self, chunk: ChunkData, k: int) -> List[Tuple[ChunkData, float]]:
+        """Optional: Return (chunk, similarity) pairs; default uses find_similar_chunks without scores."""
+        sims = self.find_similar_chunks(chunk, k)
+        return [(c, 0.0) for c in sims]
     
     @abstractmethod
     def find_duplicates(self, similarity_threshold: float) -> List[Tuple[int, int]]:
@@ -148,6 +153,28 @@ class FAISSBackend(SearchBackend):
         except RuntimeError as e:
             logger.error("Error during FAISS search: %s", e)
             return []
+
+    def find_similar_chunks_with_scores(self, chunk: ChunkData, k: int) -> List[Tuple[ChunkData, float]]:
+        if self.index is None:
+            logger.error("FAISS index not initialized")
+            return []
+        chunk_idx = self.chunk_id_to_index.get(chunk.chunk_id)
+        if chunk_idx is None or self.embeddings is None:
+            return []
+        query_vector = self.embeddings[chunk_idx:chunk_idx+1]
+        k_search = min(k + 1, len(self.chunks))
+        try:
+            sims, indices = self.index.search(query_vector, k_search)
+            pairs: List[Tuple[ChunkData, float]] = []
+            for sim, idx in zip(sims[0], indices[0]):
+                if idx != chunk_idx and idx < len(self.chunks):
+                    pairs.append((self.chunks[idx], float(sim)))
+                if len(pairs) >= k:
+                    break
+            return pairs
+        except RuntimeError as e:
+            logger.error("Error during FAISS search: %s", e)
+            return []
     
     def find_duplicates(self, similarity_threshold: float) -> List[Tuple[int, int]]:
         """Find duplicate pairs using FAISS"""
@@ -262,6 +289,40 @@ class AzureSearchBackend(SearchBackend):
                     
             return similar_chunks
             
+        except (ValueError, RuntimeError) as e:
+            logger.error("Error during Azure Search vector search: %s", e)
+            return []
+
+    def find_similar_chunks_with_scores(self, chunk: ChunkData, k: int) -> List[Tuple[ChunkData, float]]:
+        if self.search_client is None:
+            logger.error("Azure Search client not initialized")
+            return []
+        vector_field = getattr(self.config, 'AZURE_SEARCH_VECTOR_FIELD', 'content_vector')
+        chunk_id_field = getattr(self.config, 'AZURE_SEARCH_CHUNK_ID_FIELD', 'chunk_id')
+        try:
+            vector_query = {
+                "value": chunk.embedding,
+                "fields": vector_field,
+                "k": k + 5
+            }
+            results = self.search_client.search(
+                search_text="",
+                vector_queries=[vector_query],
+                top=k + 5,
+                select=[chunk_id_field, "@search.score"]
+            )
+            pairs: List[Tuple[ChunkData, float]] = []
+            for result in results:
+                result_chunk_id = result[chunk_id_field]
+                if result_chunk_id == chunk.chunk_id:
+                    continue
+                if result_chunk_id in self.chunk_lookup:
+                    similar_chunk = self.chunk_lookup[result_chunk_id]
+                    score = float(result.get("@search.score", 0.0))
+                    pairs.append((similar_chunk, score))
+                if len(pairs) >= k:
+                    break
+            return pairs
         except (ValueError, RuntimeError) as e:
             logger.error("Error during Azure Search vector search: %s", e)
             return []

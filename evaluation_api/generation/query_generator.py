@@ -264,12 +264,13 @@ class QueryGenerator:
 
         constraints_text = "\n- ".join(["Constraints:"] + constraints)
 
+        plural = "Contexts" if len(bundle.golden_chunks) > 1 else "Context"
         prompt = (
             f"You are a search query generation expert.\n\n"
             f"Task: Generate ONE {query_type} query.\n"
             f"{constraints_text}\n\n"
             f"Guidance: {guidance}\n\n"
-            f"Golden Context:\n{golden_context}\n\n"
+            f"Golden {plural}:\n{golden_context}\n\n"
             f"Distractor Context:\n{distractor_context}\n\n"
             f"Output ONLY the query, no quotes, no explanations."
         )

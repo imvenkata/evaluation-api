@@ -92,24 +92,63 @@ class ContextSelector:
                    len(sampled_chunks), sample_mode, self.backend.get_backend_info().get('backend', 'Unknown'))
         
         bundles = []
+        mode = str(getattr(self.config, "MULTI_GOLDEN_MODE", "off")).lower()
+        sim_thr = float(getattr(self.config, "GOLDEN_SIM_THRESHOLD", 0.92))
+        max_golden_docs = int(getattr(self.config, "MAX_GOLDEN_DOCS", 3))
+        min_golden_docs = int(getattr(self.config, "GOLDEN_MIN_DOCS", 2))
+
         for golden_chunk in tqdm(sampled_chunks, desc="Selecting contexts"):
             try:
-                # Use backend to find similar chunks (distractors)
-                distractor_chunks = self.backend.find_similar_chunks(
-                    golden_chunk, 
-                    self.config.NUM_DISTRACTORS
-                )
-                
-                if len(distractor_chunks) < self.config.NUM_DISTRACTORS:
-                    logger.debug("Chunk %s found only %s/%s distractors.", 
-                               golden_chunk.chunk_id, len(distractor_chunks), self.config.NUM_DISTRACTORS)
+                if mode == "cluster":
+                    # Get a larger pool to choose both multi-goldens and distractors
+                    k_pool = max(20, self.config.NUM_DISTRACTORS * 4)
+                    # Try to use scores if backend supports it
+                    try:
+                        pairs = self.backend.find_similar_chunks_with_scores(golden_chunk, k_pool)  # type: ignore[attr-defined]
+                    except AttributeError:
+                        neighbors = self.backend.find_similar_chunks(golden_chunk, k_pool)
+                        pairs = [(c, 0.0) for c in neighbors]
 
-                bundles.append(
-                    SelectionBundle(
-                        golden_chunks=[golden_chunk],
-                        distractor_chunks=distractor_chunks
+                    # Select additional goldens from different docs above similarity threshold
+                    golden_docs = {golden_chunk.doc_id}
+                    golden_list = [golden_chunk]
+                    distractor_pool: List[ChunkData] = []
+                    for candidate, sim in pairs:
+                        if candidate.doc_id in golden_docs:
+                            continue
+                        if sim >= sim_thr and len(golden_docs) < max_golden_docs:
+                            golden_docs.add(candidate.doc_id)
+                            golden_list.append(candidate)
+                        else:
+                            distractor_pool.append(candidate)
+                    # If we didn't reach minimum golden docs, fall back to single-golden
+                    if len(golden_docs) < min_golden_docs:
+                        golden_list = [golden_chunk]
+                        # Recompute distractors from top-k pool
+                        distractor_pool = [c for c, _ in pairs]
+
+                    # Now pick distractors excluding golden docs
+                    distractors: List[ChunkData] = []
+                    for cand in distractor_pool:
+                        if cand.doc_id not in golden_docs:
+                            distractors.append(cand)
+                        if len(distractors) >= self.config.NUM_DISTRACTORS:
+                            break
+                    if len(distractors) < self.config.NUM_DISTRACTORS:
+                        logger.debug("Chunk %s found only %s/%s distractors (cluster mode).",
+                                     golden_chunk.chunk_id, len(distractors), self.config.NUM_DISTRACTORS)
+
+                    bundles.append(SelectionBundle(golden_chunks=golden_list, distractor_chunks=distractors))
+                else:
+                    # Single-golden mode (existing behavior)
+                    distractor_chunks = self.backend.find_similar_chunks(
+                        golden_chunk,
+                        self.config.NUM_DISTRACTORS
                     )
-                )
+                    if len(distractor_chunks) < self.config.NUM_DISTRACTORS:
+                        logger.debug("Chunk %s found only %s/%s distractors.",
+                                     golden_chunk.chunk_id, len(distractor_chunks), self.config.NUM_DISTRACTORS)
+                    bundles.append(SelectionBundle(golden_chunks=[golden_chunk], distractor_chunks=distractor_chunks))
             except (ValueError, RuntimeError) as e:
                 logger.warning("Error finding distractors for chunk %s: %s", golden_chunk.chunk_id, e)
                 

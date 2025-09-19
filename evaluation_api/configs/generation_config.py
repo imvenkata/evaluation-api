@@ -46,6 +46,16 @@ SELECTION_NUM_BUNDLES = int(os.getenv("SELECTION_NUM_BUNDLES", "0"))
 # Prefer sampling bundles across distinct documents to increase diversity
 SELECTOR_DEDUP_DOCS = bool(os.getenv("SELECTOR_DEDUP_DOCS", "True").lower() in ("true", "1", "yes"))
 
+# --- Multi-golden selection (multi-document ground truth) ---
+# Modes: off | cluster
+MULTI_GOLDEN_MODE = os.getenv("MULTI_GOLDEN_MODE", "cluster")
+# Cosine similarity threshold for considering another chunk as equivalent-answer
+GOLDEN_SIM_THRESHOLD = float(os.getenv("GOLDEN_SIM_THRESHOLD", "0.92"))
+# Max number of distinct documents to include as goldens
+MAX_GOLDEN_DOCS = int(os.getenv("MAX_GOLDEN_DOCS", "5"))
+# Minimum number of goldens (docs) to form a multi-golden bundle; otherwise fall back to single
+GOLDEN_MIN_DOCS = int(os.getenv("GOLDEN_MIN_DOCS", "2"))
+
 # Number of "hard negative" distractors to find
 NUM_DISTRACTORS = 3
 
@@ -79,8 +89,8 @@ else:
 QUERY_SAMPLING_MODE = os.getenv("QUERY_SAMPLING_MODE", "sample_per_bundle")
 
 # For sample_per_bundle: range of query types per bundle
-MIN_QUERY_TYPES_PER_BUNDLE = int(os.getenv("MIN_QUERY_TYPES_PER_BUNDLE", "1"))
-MAX_QUERY_TYPES_PER_BUNDLE = int(os.getenv("MAX_QUERY_TYPES_PER_BUNDLE", "2"))
+MIN_QUERY_TYPES_PER_BUNDLE = int(os.getenv("MIN_QUERY_TYPES_PER_BUNDLE", "2"))
+MAX_QUERY_TYPES_PER_BUNDLE = int(os.getenv("MAX_QUERY_TYPES_PER_BUNDLE", "3"))
 
 # Optional weight map for types (edit in code). If empty, uniform weights are used.
 # Example: {"keyword": 2.0, "web_search_like": 1.5}
