@@ -40,18 +40,31 @@ class ContextSelector:
             return []
             
         # Determine target number of bundles
-        target_queries = int(getattr(self.config, "SELECTION_TARGET_QUERIES", 0) or 0)
-        queries_per_bundle = max(1, len(getattr(self.config, "QUERY_TYPES", ["factual"])) )
-        if target_queries > 0:
-            target_bundles = max(1, (target_queries + queries_per_bundle - 1) // queries_per_bundle)
+        direct_bundles = int(getattr(self.config, "SELECTION_NUM_BUNDLES", 0) or 0)
+        if direct_bundles > 0:
+            target_bundles = direct_bundles
         else:
-            target_bundles = None
+            # Estimate bundles from target queries and per-bundle query sampling
+            target_queries = int(getattr(self.config, "SELECTION_TARGET_QUERIES", 0) or 0)
+            if target_queries > 0:
+                sampling_mode = str(getattr(self.config, "QUERY_SAMPLING_MODE", "all_per_bundle")).lower()
+                if sampling_mode == "sample_per_bundle":
+                    min_q = int(getattr(self.config, "MIN_QUERY_TYPES_PER_BUNDLE", 1))
+                    max_q = int(getattr(self.config, "MAX_QUERY_TYPES_PER_BUNDLE", max(1, len(getattr(self.config, "QUERY_TYPES", ["keyword"])))))
+                    avg_q = max(1, int(round((min_q + max_q) / 2)))
+                    queries_per_bundle = avg_q
+                else:
+                    queries_per_bundle = max(1, len(getattr(self.config, "QUERY_TYPES", ["keyword"])) )
+                target_bundles = max(1, (target_queries + queries_per_bundle - 1) // queries_per_bundle)
+            else:
+                target_bundles = None
 
         # Determine sampling unit
         sample_mode = getattr(self.config, "SELECTION_SAMPLE_MODE", "chunks").lower()
         sample_rate = float(getattr(self.config, "SELECTION_SAMPLE_RATE", 0.1))
+        dedup_docs = bool(getattr(self.config, "SELECTOR_DEDUP_DOCS", True))
 
-        if sample_mode == "documents":
+        if sample_mode == "documents" or dedup_docs:
             # Group chunks by doc_id, sample documents, then pick one representative chunk per doc
             from collections import defaultdict
             doc_to_chunks = defaultdict(list)
@@ -62,15 +75,18 @@ class ContextSelector:
                 num_docs = min(target_bundles, len(doc_ids))
             else:
                 num_docs = max(1, min(int(len(doc_ids) * sample_rate), len(doc_ids)))
-            sampled_docs = random.sample(doc_ids, num_docs)
+            if num_docs > len(doc_ids):
+                num_docs = len(doc_ids)
+            sampled_docs = random.sample(doc_ids, num_docs) if doc_ids else []
             sampled_chunks = [random.choice(doc_to_chunks[d]) for d in sampled_docs]
         else:
             # Chunk-based sampling
+            total = len(self.chunks)
             if target_bundles is not None:
-                num_to_sample = min(target_bundles, len(self.chunks))
+                num_to_sample = min(target_bundles, total)
             else:
-                num_to_sample = max(1, min(int(len(self.chunks) * sample_rate), len(self.chunks)))
-            sampled_chunks = random.sample(self.chunks, num_to_sample)
+                num_to_sample = max(1, min(int(total * sample_rate), total))
+            sampled_chunks = random.sample(self.chunks, num_to_sample) if total else []
 
         logger.info("Attempting to select %s contexts (mode=%s) using %s backend...",
                    len(sampled_chunks), sample_mode, self.backend.get_backend_info().get('backend', 'Unknown'))

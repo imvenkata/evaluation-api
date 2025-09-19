@@ -1,4 +1,3 @@
-# --- File: search-evaluation-api/configs/generation_config.py ---
 # This file stores all the parameters for the generation pipeline.
 
 import os
@@ -25,7 +24,7 @@ CACHE_PATH = ".cache/generation/"
 
 # --- Chunk Validation Thresholds ---
 MIN_TOKEN_LENGTH = 5
-MAX_TOKEN_LENGTH = 350
+MAX_TOKEN_LENGTH = 5000
 # Cosine similarity threshold for flagging duplicates
 DUPLICATE_COSINE_SIM = 0.98
 
@@ -38,15 +37,20 @@ SELECTION_SAMPLE_RATE = 1
 SELECTION_SAMPLE_MODE = os.getenv("SELECTION_SAMPLE_MODE", "chunks")
 
 # Alternatively, request a fixed number of queries (overrides rate if > 0).
-# Each selection bundle can produce len(QUERY_TYPES) queries; selector targets
-# ceil(SELECTION_TARGET_QUERIES / len(QUERY_TYPES)) bundles when > 0.
-SELECTION_TARGET_QUERIES = int(os.getenv("SELECTION_TARGET_QUERIES", "2"))
+# When > 0, the selector targets ceil(SELECTION_TARGET_QUERIES / est_queries_per_bundle) bundles.
+SELECTION_TARGET_QUERIES = int(os.getenv("SELECTION_TARGET_QUERIES", "20"))
+
+# Or specify fixed number of bundles directly (overrides target-queries logic when > 0)
+SELECTION_NUM_BUNDLES = int(os.getenv("SELECTION_NUM_BUNDLES", "0"))
+
+# Prefer sampling bundles across distinct documents to increase diversity
+SELECTOR_DEDUP_DOCS = bool(os.getenv("SELECTOR_DEDUP_DOCS", "True").lower() in ("true", "1", "yes"))
 
 # Number of "hard negative" distractors to find
 NUM_DISTRACTORS = 3
 
 # --- Query Generation ---
-# Types of queries to generate per chunk. Supported values:
+# Types of queries to generate in the corpus. Supported values:
 #   "concept_seeking", "exact_snippet", "web_search_like", "low_overlap",
 #   "fact_seeking", "keyword", "misspellings", "long", "medium", "short",
 #   "comparison"
@@ -68,6 +72,19 @@ if _env_query_types:
     QUERY_TYPES = [t.strip() for t in _env_query_types.split(",") if t.strip()]
 else:
     QUERY_TYPES = _DEFAULT_QUERY_TYPES
+
+# Query type sampling strategy per bundle:
+#   - "all_per_bundle": generate every type in QUERY_TYPES per bundle
+#   - "sample_per_bundle": sample a subset per bundle using weights/ranges (recommended)
+QUERY_SAMPLING_MODE = os.getenv("QUERY_SAMPLING_MODE", "sample_per_bundle")
+
+# For sample_per_bundle: range of query types per bundle
+MIN_QUERY_TYPES_PER_BUNDLE = int(os.getenv("MIN_QUERY_TYPES_PER_BUNDLE", "1"))
+MAX_QUERY_TYPES_PER_BUNDLE = int(os.getenv("MAX_QUERY_TYPES_PER_BUNDLE", "2"))
+
+# Optional weight map for types (edit in code). If empty, uniform weights are used.
+# Example: {"keyword": 2.0, "web_search_like": 1.5}
+QUERY_TYPE_WEIGHTS = {}
 
 # Per-type max tokens for LLM output (query length control)
 # Users can override via env, e.g., QUERY_MAX_TOKENS_long=64
@@ -104,12 +121,13 @@ for _qt, _default in list(QUERY_TYPE_MAX_TOKENS.items()):
                 QUERY_TYPE_MAX_TOKENS[_qt] = int(_val)
             except ValueError:
                 pass
+
 # Azure OpenAI config (for real implementation)
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "")
 
 # --- Embeddings / Reproducibility ---
-# Set to 1024 to match input embedding dimension
+# Set to match input embedding dimension
 EMBED_DIM = 512
 SEED = 42
 
@@ -156,7 +174,6 @@ AZURE_SEARCH_TIMEOUT_SECONDS = int(os.getenv("AZURE_SEARCH_TIMEOUT_SECONDS", "30
 RAGAS_CONTEXT_RELEVANCE_THRESHOLD = 0.8
 DEEPEVAL_FAITHFULNESS_THRESHOLD = 0.85
 
-
 BM25_MIN_MARGIN = 0.5
 COVERAGE_MIN_GOLDEN = 0.6
 COVERAGE_GAP_MIN = 0.2
@@ -194,3 +211,5 @@ CACHE_EVALUATION = bool(os.getenv("CACHE_EVALUATION", "True").lower() in ("true"
 # Cache management
 CACHE_TTL_HOURS = int(os.getenv("CACHE_TTL_HOURS", "168"))  # 1 week default
 CACHE_MAX_SIZE_MB = int(os.getenv("CACHE_MAX_SIZE_MB", "1024"))  # 1GB default
+
+

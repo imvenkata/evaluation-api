@@ -135,9 +135,51 @@ class QueryGenerator:
             return None
 
         tasks = []
+        # Determine query type sampling mode
+        sampling_mode = str(getattr(self.config, "QUERY_SAMPLING_MODE", "all_per_bundle")).lower()
+        type_weights = getattr(self.config, "QUERY_TYPE_WEIGHTS", {}) or {}
+        all_types = list(getattr(self.config, "QUERY_TYPES", []))
+
+        def sample_types_for_bundle() -> List[str]:
+            if sampling_mode == "all_per_bundle" or not all_types:
+                return all_types
+            min_q = int(getattr(self.config, "MIN_QUERY_TYPES_PER_BUNDLE", 1))
+            max_q = int(getattr(self.config, "MAX_QUERY_TYPES_PER_BUNDLE", max(1, len(all_types))))
+            if max_q < min_q:
+                max_q = min_q
+            k = max(1, min(random.randint(min_q, max_q), len(all_types)))
+            # Weighted sampling without replacement
+            weights = [float(type_weights.get(t, 1.0)) for t in all_types]
+            # Normalize
+            total_w = sum(weights)
+            probs = [w / total_w if total_w > 0 else 1.0 / len(all_types) for w in weights]
+            chosen = []
+            pool = all_types[:]
+            pool_probs = probs[:]
+            for _ in range(k):
+                # pick one based on current probs
+                r = random.random()
+                acc = 0.0
+                idx = 0
+                for i, p in enumerate(pool_probs):
+                    acc += p
+                    if r <= acc:
+                        idx = i
+                        break
+                chosen.append(pool[idx])
+                # remove and renormalize
+                del pool[idx]
+                del pool_probs[idx]
+                s = sum(pool_probs)
+                pool_probs = [p / s for p in pool_probs] if s > 0 else []
+                if not pool:
+                    break
+            return chosen
+
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             for bundle in bundles:
-                for qt in self.config.QUERY_TYPES:
+                selected_types = sample_types_for_bundle()
+                for qt in selected_types:
                     tasks.append(ex.submit(process, bundle, qt))
             results = []
             for fut in tqdm(as_completed(tasks), total=len(tasks), desc="Generating queries"):
